@@ -104,6 +104,36 @@ const verifySuperAdmin = async (req, res, next) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
+// Update user profile (Authenticated user can update their own profile)
+app.patch('/users/:id', async (req, res) => {
+  const userId = req.params.id;
+  const email = req.decoded.email;
+  const updateData = req.body;
+  
+  try {
+    // First, verify that the user is updating their own profile
+    const user = await usersCollection.findOne({ email });
+    if (!user || user._id.toString() !== userId) {
+      return res.status(403).send({ message: 'Unauthorized to update this profile' });
+    }
+    
+    const filter = { _id: new ObjectId(userId) };
+    const updateDoc = {
+      $set: {
+        displayName: updateData.displayName,
+        phone: updateData.phone,
+        address: updateData.address,
+        bio: updateData.bio
+      }
+    };
+    
+    const result = await usersCollection.updateOne(filter, updateDoc);
+    res.send(result);
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).send({ message: 'Failed to update profile' });
+  }
+});
 
     // Check if user is admin
     app.get('/users/admin/:email', verifyToken, async (req, res) => {
@@ -234,7 +264,20 @@ app.delete('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
       const result = await reviewCollection.find().toArray();
       res.send(result);
     });
+// Add this inside the `run()` function after defining `reviewCollection`
 
+// POST a new review
+app.post("/reviews", async (req, res) => {
+  const newReview = req.body;
+  const result = await reviewCollection.insertOne(newReview);
+  res.send(result);
+});
+app.delete("/reviews/:id", verifyToken, async (req, res) => {
+  const id = req.params.id;
+  const query = { _id: new ObjectId(id) };
+  const result = await reviewCollection.deleteOne(query);
+  res.send(result);
+});
     // Cart operations
     app.post("/carts", verifyToken, async (req, res) => {
       const cartItems = req.body;
