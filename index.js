@@ -51,6 +51,7 @@ async function run() {
     const cartCollection = client.db("khanarDokanDB").collection("carts")
     const ordersCollection = client.db("khanarDokanDB").collection("orders");
 const reservationsCollection = client.db("khanarDokanDB").collection("reservations");
+const supportCollection = client.db("khanarDokanDB").collection("support");
 
 const verifyAdmin = async (req, res, next) => {
   const email = req.decoded.email;
@@ -572,7 +573,75 @@ app.get('/admin/orders/date-range', verifyToken, verifyAdmin, async (req, res) =
     res.status(500).send({ error: 'Failed to fetch orders' });
   }
 });
+// Add this endpoint to your existing order routes
 
+// Delete order (Admin only)
+app.delete('/admin/orders/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    
+    // Check if order exists
+    const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
+    if (!order) {
+      return res.status(404).send({ error: 'Order not found' });
+    }
+
+    // Optional: Prevent deletion of delivered orders for record keeping
+    // Uncomment the following lines if you want to restrict deletion
+    /*
+    if (order.deliveryStatus === 'delivered') {
+      return res.status(400).send({ 
+        error: 'Cannot delete delivered orders for record keeping purposes' 
+      });
+    }
+    */
+
+    const result = await ordersCollection.deleteOne({ _id: new ObjectId(id) });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ error: 'Order not found' });
+    }
+
+    res.send({ 
+      message: 'Order deleted successfully',
+      deletedOrderId: id,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Error deleting order:', error);
+    res.status(500).send({ error: 'Failed to delete order' });
+  }
+});
+
+// Alternative: Soft delete (marks as deleted but keeps in database)
+app.patch('/admin/orders/:id/soft-delete', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $set: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        deletedBy: req.decoded.email
+      }
+    };
+
+    const result = await ordersCollection.updateOne(filter, updateDoc);
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ error: 'Order not found' });
+    }
+
+    res.send({ 
+      message: 'Order soft deleted successfully',
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error('Error soft deleting order:', error);
+    res.status(500).send({ error: 'Failed to delete order' });
+  }
+});
 
 
 // Add these routes to your existing server.js file after the orders section
@@ -925,6 +994,359 @@ app.get('/admin/reservations/date-range', verifyToken, verifyAdmin, async (req, 
     res.status(500).send({ error: 'Failed to fetch reservations' });
   }
 });
+
+
+
+
+
+
+
+
+// Add these routes to your existing server.js file after the reservations section
+
+// Support Collection - Add this to your collections section
+
+// Create a new support ticket
+app.post('/support', async (req, res) => {
+  try {
+    const supportTicket = req.body;
+    
+    // Validate required fields
+    if (!supportTicket.name || !supportTicket.email || !supportTicket.subject || !supportTicket.message) {
+      return res.status(400).send({ error: 'Missing required support ticket data' });
+    }
+
+    // Add metadata
+    supportTicket.createdAt = new Date();
+    supportTicket.updatedAt = new Date();
+    supportTicket.status = supportTicket.status || 'open';
+    supportTicket.priority = supportTicket.priority || 'medium';
+    
+    // Generate ticket ID
+    const count = await supportCollection.countDocuments();
+    supportTicket.ticketId = `T${String(count + 1).padStart(4, '0')}`;
+
+    const result = await supportCollection.insertOne(supportTicket);
+    res.send(result);
+  } catch (error) {
+    console.error('Error creating support ticket:', error);
+    res.status(500).send({ error: 'Failed to create support ticket' });
+  }
+});
+
+// Get all support tickets (Admin only)
+app.get('/admin/support', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { status, priority, search } = req.query;
+    let query = {};
+
+    // Build query based on filters
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    if (priority && priority !== 'all') {
+      query.priority = priority;
+    }
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { subject: { $regex: search, $options: 'i' } },
+        { ticketId: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const result = await supportCollection.find(query).sort({ createdAt: -1 }).toArray();
+    res.send(result);
+  } catch (error) {
+    console.error('Error fetching support tickets:', error);
+    res.status(500).send({ error: 'Failed to fetch support tickets' });
+  }
+});
+
+// Get user's support tickets
+app.get('/support', async (req, res) => {
+  try {
+    const email = req.query.email;
+    
+    if (!email) {
+      return res.status(400).send({ error: 'Email is required' });
+    }
+
+    const query = { email: email };
+    const result = await supportCollection.find(query).sort({ createdAt: -1 }).toArray();
+    res.send(result);
+  } catch (error) {
+    console.error('Error fetching user support tickets:', error);
+    res.status(500).send({ error: 'Failed to fetch support tickets' });
+  }
+});
+
+// Get single support ticket
+app.get('/support/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const ticket = await supportCollection.findOne(query);
+
+    if (!ticket) {
+      return res.status(404).send({ error: 'Support ticket not found' });
+    }
+
+    res.send(ticket);
+  } catch (error) {
+    console.error('Error fetching support ticket:', error);
+    res.status(500).send({ error: 'Failed to fetch support ticket' });
+  }
+});
+
+// Update support ticket status (Admin only)
+app.patch('/admin/support/:id/status', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status } = req.body;
+    
+    if (!status) {
+      return res.status(400).send({ error: 'Status is required' });
+    }
+
+    const validStatuses = ['open', 'in-progress', 'resolved', 'closed'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).send({ error: 'Invalid status' });
+    }
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $set: {
+        status: status,
+        updatedAt: new Date()
+      }
+    };
+
+    const result = await supportCollection.updateOne(filter, updateDoc);
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ error: 'Support ticket not found' });
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error('Error updating support ticket status:', error);
+    res.status(500).send({ error: 'Failed to update support ticket status' });
+  }
+});
+
+// Update support ticket priority (Admin only)
+app.patch('/admin/support/:id/priority', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { priority } = req.body;
+    
+    if (!priority) {
+      return res.status(400).send({ error: 'Priority is required' });
+    }
+
+    const validPriorities = ['low', 'medium', 'high', 'urgent'];
+    if (!validPriorities.includes(priority)) {
+      return res.status(400).send({ error: 'Invalid priority' });
+    }
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $set: {
+        priority: priority,
+        updatedAt: new Date()
+      }
+    };
+
+    const result = await supportCollection.updateOne(filter, updateDoc);
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ error: 'Support ticket not found' });
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error('Error updating support ticket priority:', error);
+    res.status(500).send({ error: 'Failed to update support ticket priority' });
+  }
+});
+
+// Add admin response to support ticket
+app.post('/admin/support/:id/response', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { response } = req.body;
+    
+    if (!response) {
+      return res.status(400).send({ error: 'Response is required' });
+    }
+
+    const responseData = {
+      message: response,
+      respondedBy: req.decoded.email,
+      respondedAt: new Date()
+    };
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $push: {
+        responses: responseData
+      },
+      $set: {
+        status: 'in-progress',
+        updatedAt: new Date()
+      }
+    };
+
+    const result = await supportCollection.updateOne(filter, updateDoc);
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ error: 'Support ticket not found' });
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error('Error adding support ticket response:', error);
+    res.status(500).send({ error: 'Failed to add response to support ticket' });
+  }
+});
+
+// Delete support ticket (Admin only)
+app.delete('/admin/support/:id', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await supportCollection.deleteOne(query);
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ error: 'Support ticket not found' });
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error('Error deleting support ticket:', error);
+    res.status(500).send({ error: 'Failed to delete support ticket' });
+  }
+});
+
+// Get support statistics (Admin only)
+app.get('/admin/support-stats', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const totalTickets = await supportCollection.countDocuments();
+    
+    const statusCounts = await supportCollection.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    const priorityCounts = await supportCollection.aggregate([
+      {
+        $group: {
+          _id: '$priority',
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    const openTickets = await supportCollection.countDocuments({
+      status: { $in: ['open', 'in-progress'] }
+    });
+
+    const urgentTickets = await supportCollection.countDocuments({
+      priority: 'urgent',
+      status: { $in: ['open', 'in-progress'] }
+    });
+
+    // Monthly tickets for the last 6 months
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const monthlyTickets = await supportCollection.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: sixMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { '_id.year': 1, '_id.month': 1 }
+      }
+    ]).toArray();
+
+    // Category counts
+    const categoryCounts = await supportCollection.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      }
+    ]).toArray();
+
+    res.send({
+      totalTickets,
+      statusCounts,
+      priorityCounts,
+      openTickets,
+      urgentTickets,
+      monthlyTickets,
+      categoryCounts
+    });
+  } catch (error) {
+    console.error('Error fetching support statistics:', error);
+    res.status(500).send({ error: 'Failed to fetch support statistics' });
+  }
+});
+
+// Get support tickets by date range (Admin only)
+app.get('/admin/support/date-range', verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    if (!startDate || !endDate) {
+      return res.status(400).send({ error: 'Start date and end date are required' });
+    }
+
+    const query = {
+      createdAt: {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      }
+    };
+
+    const result = await supportCollection.find(query).sort({ createdAt: -1 }).toArray();
+    res.send(result);
+  } catch (error) {
+    console.error('Error fetching support tickets by date range:', error);
+    res.status(500).send({ error: 'Failed to fetch support tickets' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
