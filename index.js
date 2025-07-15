@@ -43,7 +43,7 @@ const verifyToken = (req, res, next) => {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     const usersCollection = client.db("khanarDokanDB").collection("users");
     const menuCollection = client.db("khanarDokanDB").collection("menu");
