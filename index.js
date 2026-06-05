@@ -106,8 +106,7 @@ const verifySuperAdmin = async (req, res, next) => {
       res.send(result);
     });
 // Update user profile (Authenticated user can update their own profile)
-app.patch('/users/:id', async (req, res) => {
-  const userId = req.params.id;
+app.patch('/users/:id', verifyToken, async (req, res) => {  const userId = req.params.id;
   const email = req.decoded.email;
   const updateData = req.body;
   
